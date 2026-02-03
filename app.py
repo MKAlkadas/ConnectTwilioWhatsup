@@ -1,3 +1,4 @@
+from fastapi import logger
 from twilio.rest import Client
 from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
@@ -115,6 +116,64 @@ def send_message():
         app.logger.error(f"❌ خطأ في إرسال الرسالة: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/status-callback', methods=['POST'])
+def status_callback():
+    """استقبال تحديثات حالة الرسائل من Twilio"""
+    try:
+        message_sid = request.values.get('MessageSid', '')
+        message_status = request.values.get('MessageStatus', '')
+        error_code = request.values.get('ErrorCode', '')
+        to_number = request.values.get('To', '')
+        
+        logger.info(f"📊 Message Status Update: {message_sid} -> {message_status}")
+        
+        if message_status in ['failed', 'undelivered']:
+            logger.error(f"❌ Message failed: {message_sid}, Error: {error_code}, To: {to_number}")
+        
+        # يمكنك حفظ هذه المعلومات في قاعدة بيانات
+        save_message_status({
+            'message_sid': message_sid,
+            'status': message_status,
+            'error_code': error_code,
+            'to': to_number,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        return '', 200
+    
+    except Exception as e:
+        logger.error(f"❌ Error in status callback: {str(e)}")
+        return '', 200
+
+def save_message_status(status_data):
+    """حفظ حالة الرسالة"""
+    try:
+        os.makedirs('status_logs', exist_ok=True)
+        log_file = f'status_logs/status_{datetime.now().strftime("%Y-%m-%d")}.json'
+        
+        # قراءة السجلات الموجودة
+        logs = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        logs = json.loads(f'[{content.replace("}{", "},{")}]')
+            except:
+                logs = []
+        
+        # إضافة السجل الجديد
+        logs.append(status_data)
+        
+        # حفظ الملف
+        with open(log_file, 'w', encoding='utf-8') as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"✅ Saved status: {status_data['message_sid']} -> {status_data['status']}")
+    
+    except Exception as e:
+        logger.error(f"❌ Error saving status: {str(e)}")
+        
 @app.route('/health', methods=['GET'])
 def health_check():
     """فحص حالة التطبيق"""
